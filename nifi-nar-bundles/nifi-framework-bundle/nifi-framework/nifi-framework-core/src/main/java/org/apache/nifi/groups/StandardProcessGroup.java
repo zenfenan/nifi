@@ -110,6 +110,7 @@ import org.apache.nifi.remote.StandardRemoteProcessGroupPortDescriptor;
 import org.apache.nifi.remote.protocol.SiteToSiteTransportProtocol;
 import org.apache.nifi.scheduling.ExecutionNode;
 import org.apache.nifi.scheduling.SchedulingStrategy;
+import org.apache.nifi.util.FlowDifferenceFilters;
 import org.apache.nifi.util.NiFiProperties;
 import org.apache.nifi.util.ReflectionUtils;
 import org.apache.nifi.util.SnippetUtils;
@@ -1647,6 +1648,18 @@ public final class StandardProcessGroup implements ProcessGroup {
         final Funnel funnel = group.getFunnel(identifier);
         if (funnel != null) {
             return funnel;
+        }
+
+        for (final RemoteProcessGroup remoteProcessGroup : group.getRemoteProcessGroups()) {
+            final RemoteGroupPort remoteInputPort = remoteProcessGroup.getInputPort(identifier);
+            if (remoteInputPort != null) {
+                return remoteInputPort;
+            }
+
+            final RemoteGroupPort remoteOutputPort = remoteProcessGroup.getOutputPort(identifier);
+            if (remoteOutputPort != null) {
+                return remoteOutputPort;
+            }
         }
 
         for (final ProcessGroup childGroup : group.getProcessGroups()) {
@@ -3891,9 +3904,17 @@ public final class StandardProcessGroup implements ProcessGroup {
                 }
 
                 final RemoteProcessGroup rpg = rpgOption.get();
-                return rpg.getInputPorts().stream()
+                final Optional<RemoteGroupPort> portByIdOption = rpg.getInputPorts().stream()
                     .filter(component -> component.getVersionedComponentId().isPresent())
                     .filter(component -> id.equals(component.getVersionedComponentId().get()))
+                    .findAny();
+
+                if (portByIdOption.isPresent()) {
+                    return portByIdOption.get();
+                }
+
+                return rpg.getInputPorts().stream()
+                    .filter(component -> connectableComponent.getName().equals(component.getName()))
                     .findAny()
                     .orElse(null);
             }
@@ -3901,7 +3922,7 @@ public final class StandardProcessGroup implements ProcessGroup {
                 final String rpgId = connectableComponent.getGroupId();
                 final Optional<RemoteProcessGroup> rpgOption = group.getRemoteProcessGroups().stream()
                     .filter(component -> component.getVersionedComponentId().isPresent())
-                    .filter(component -> id.equals(component.getVersionedComponentId().get()))
+                    .filter(component -> rpgId.equals(component.getVersionedComponentId().get()))
                     .findAny();
 
                 if (!rpgOption.isPresent()) {
@@ -3910,9 +3931,17 @@ public final class StandardProcessGroup implements ProcessGroup {
                 }
 
                 final RemoteProcessGroup rpg = rpgOption.get();
-                return rpg.getOutputPorts().stream()
+                final Optional<RemoteGroupPort> portByIdOption = rpg.getOutputPorts().stream()
                     .filter(component -> component.getVersionedComponentId().isPresent())
                     .filter(component -> id.equals(component.getVersionedComponentId().get()))
+                    .findAny();
+
+                if (portByIdOption.isPresent()) {
+                    return portByIdOption.get();
+                }
+
+                return rpg.getOutputPorts().stream()
+                    .filter(component -> connectableComponent.getName().equals(component.getName()))
                     .findAny()
                     .orElse(null);
             }
@@ -4051,8 +4080,8 @@ public final class StandardProcessGroup implements ProcessGroup {
         final Map<String, String> properties = populatePropertiesMap(processor.getProperties(), proposed.getProperties(), proposed.getPropertyDescriptors(), processor.getProcessGroup());
         processor.setProperties(properties, true);
         processor.setRunDuration(proposed.getRunDurationMillis(), TimeUnit.MILLISECONDS);
-        processor.setScheduldingPeriod(proposed.getSchedulingPeriod());
         processor.setSchedulingStrategy(SchedulingStrategy.valueOf(proposed.getSchedulingStrategy()));
+        processor.setScheduldingPeriod(proposed.getSchedulingPeriod());
         processor.setStyle(proposed.getStyle());
         processor.setYieldPeriod(proposed.getYieldDuration());
         processor.setPosition(new Position(proposed.getPosition().getX(), proposed.getPosition().getY()));
@@ -4069,15 +4098,28 @@ public final class StandardProcessGroup implements ProcessGroup {
     private Map<String, String> populatePropertiesMap(final Map<PropertyDescriptor, String> currentProperties, final Map<String, String> proposedProperties,
         final Map<String, VersionedPropertyDescriptor> proposedDescriptors, final ProcessGroup group) {
 
+        // since VersionedPropertyDescriptor currently doesn't know if it is sensitive or not,
+        // keep track of which property descriptors are sensitive from the current properties
+        final Set<String> sensitiveProperties = new HashSet<>();
+
         final Map<String, String> fullPropertyMap = new HashMap<>();
         for (final PropertyDescriptor property : currentProperties.keySet()) {
-            fullPropertyMap.put(property.getName(), null);
+            if (property.isSensitive()) {
+                sensitiveProperties.add(property.getName());
+            } else {
+                fullPropertyMap.put(property.getName(), null);
+            }
         }
 
         if (proposedProperties != null) {
             for (final Map.Entry<String, String> entry : proposedProperties.entrySet()) {
                 final String propertyName = entry.getKey();
                 final VersionedPropertyDescriptor descriptor = proposedDescriptors.get(propertyName);
+
+                // skip any sensitive properties so we can retain whatever is currently set
+                if (sensitiveProperties.contains(propertyName)) {
+                    continue;
+                }
 
                 String value;
                 if (descriptor != null && descriptor.getIdentifiesControllerService()) {
@@ -4197,8 +4239,9 @@ public final class StandardProcessGroup implements ProcessGroup {
         final FlowComparator flowComparator = new StandardFlowComparator(snapshotFlow, currentFlow, getAncestorGroupServiceIds(), new EvolvingDifferenceDescriptor());
         final FlowComparison comparison = flowComparator.compare();
         final Set<FlowDifference> differences = comparison.getDifferences().stream()
-            .filter(difference -> difference.getDifferenceType() != DifferenceType.BUNDLE_CHANGED)
-            .collect(Collectors.toCollection(HashSet::new));
+                .filter(difference -> difference.getDifferenceType() != DifferenceType.BUNDLE_CHANGED)
+                .filter(FlowDifferenceFilters.FILTER_ADDED_REMOVED_REMOTE_PORTS)
+                .collect(Collectors.toCollection(HashSet::new));
 
         LOG.debug("There are {} differences between this Local Flow and the Versioned Flow: {}", differences.size(), differences);
         return differences;

@@ -139,6 +139,7 @@ import org.apache.nifi.reporting.Bulletin;
 import org.apache.nifi.reporting.BulletinRepository;
 import org.apache.nifi.reporting.ReportingTask;
 import org.apache.nifi.scheduling.SchedulingStrategy;
+import org.apache.nifi.util.FlowDifferenceFilters;
 import org.apache.nifi.util.FormatUtils;
 import org.apache.nifi.web.FlowModification;
 import org.apache.nifi.web.Revision;
@@ -1534,6 +1535,7 @@ public final class DtoFactory {
 
         final RemoteProcessGroupPortDTO dto = new RemoteProcessGroupPortDTO();
         dto.setId(port.getIdentifier());
+        dto.setGroupId(port.getRemoteProcessGroup().getIdentifier());
         dto.setTargetId(port.getTargetIdentifier());
         dto.setName(port.getName());
         dto.setComments(port.getComments());
@@ -2222,6 +2224,11 @@ public final class DtoFactory {
         for (final FlowDifference difference : comparison.getDifferences()) {
             // Ignore these as local differences for now because we can't do anything with it
             if (difference.getDifferenceType() == DifferenceType.BUNDLE_CHANGED) {
+                continue;
+            }
+
+            // Ignore differences for adding remote ports
+            if (FlowDifferenceFilters.isAddedOrRemovedRemotePort(difference)) {
                 continue;
             }
 
@@ -3173,6 +3180,7 @@ public final class DtoFactory {
         dto.setBulletinLevel(procNode.getBulletinLevel().name());
         dto.setSchedulingStrategy(procNode.getSchedulingStrategy().name());
         dto.setExecutionNode(procNode.getExecutionNode().name());
+        dto.setExecutionNodeRestricted(procNode.isExecutionNodeRestricted());
         dto.setAnnotationData(procNode.getAnnotationData());
 
         // set up the default values for concurrent tasks and scheduling period
@@ -3382,6 +3390,7 @@ public final class DtoFactory {
         copy.setComments(original.getComments());
         copy.setSchedulingStrategy(original.getSchedulingStrategy());
         copy.setExecutionNode(original.getExecutionNode());
+        copy.setExecutionNodeRestricted(original.isExecutionNodeRestricted());
         copy.setConcurrentlySchedulableTaskCount(original.getConcurrentlySchedulableTaskCount());
         copy.setCustomUiUrl(original.getCustomUiUrl());
         copy.setDescriptors(copy(original.getDescriptors()));

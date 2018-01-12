@@ -66,6 +66,10 @@ public abstract class ProcessorNode extends AbstractConfiguredComponent implemen
 
     public abstract boolean isHighThroughputSupported();
 
+    public abstract boolean isExecutionNodeRestricted();
+
+    public abstract void setExecutionNodeRestricted(boolean executionNodeRestricted);
+
     public abstract Requirement getInputRequirement();
 
     @Override

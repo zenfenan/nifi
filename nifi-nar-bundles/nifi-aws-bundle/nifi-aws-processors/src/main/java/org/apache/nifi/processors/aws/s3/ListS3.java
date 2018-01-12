@@ -28,6 +28,7 @@ import java.util.concurrent.TimeUnit;
 
 import org.apache.nifi.annotation.behavior.InputRequirement;
 import org.apache.nifi.annotation.behavior.InputRequirement.Requirement;
+import org.apache.nifi.annotation.behavior.RunOnPrimaryNode;
 import org.apache.nifi.annotation.behavior.Stateful;
 import org.apache.nifi.annotation.behavior.TriggerSerially;
 import org.apache.nifi.annotation.behavior.TriggerWhenEmpty;
@@ -57,6 +58,7 @@ import com.amazonaws.services.s3.model.VersionListing;
 import com.amazonaws.services.s3.model.ListObjectsV2Request;
 import com.amazonaws.services.s3.model.ListObjectsV2Result;
 
+@RunOnPrimaryNode
 @TriggerSerially
 @TriggerWhenEmpty
 @InputRequirement(Requirement.INPUT_FORBIDDEN)
@@ -124,10 +126,19 @@ public class ListS3 extends AbstractS3Processor {
             .description("Specifies whether to use the original List Objects or the newer List Objects Version 2 endpoint.")
             .build();
 
+    public static final PropertyDescriptor MIN_AGE = new PropertyDescriptor.Builder()
+            .name("min-age")
+            .displayName("Minimum Object Age")
+            .description("The minimum age that an S3 object must be in order to be considered; any object younger than this amount of time (according to last modification date) will be ignored")
+            .required(true)
+            .addValidator(StandardValidators.TIME_PERIOD_VALIDATOR)
+            .defaultValue("0 sec")
+            .build();
+
     public static final List<PropertyDescriptor> properties = Collections.unmodifiableList(
             Arrays.asList(BUCKET, REGION, ACCESS_KEY, SECRET_KEY, CREDENTIALS_FILE,
                     AWS_CREDENTIALS_PROVIDER_SERVICE, TIMEOUT, SSL_CONTEXT_SERVICE, ENDPOINT_OVERRIDE,
-                    SIGNER_OVERRIDE, PROXY_HOST, PROXY_HOST_PORT, DELIMITER, PREFIX, USE_VERSIONS, LIST_TYPE));
+                    SIGNER_OVERRIDE, PROXY_HOST, PROXY_HOST_PORT, DELIMITER, PREFIX, USE_VERSIONS, LIST_TYPE, MIN_AGE));
 
     public static final Set<Relationship> relationships = Collections.unmodifiableSet(
             new HashSet<>(Collections.singletonList(REL_SUCCESS)));
@@ -197,6 +208,8 @@ public class ListS3 extends AbstractS3Processor {
 
         final long startNanos = System.nanoTime();
         final String bucket = context.getProperty(BUCKET).evaluateAttributeExpressions().getValue();
+        final long minAgeMilliseconds = context.getProperty(MIN_AGE).asTimePeriod(TimeUnit.MILLISECONDS);
+        final long listingTimestamp = System.currentTimeMillis();
 
         final AmazonS3 client = getClient();
         int listCount = 0;
@@ -227,7 +240,8 @@ public class ListS3 extends AbstractS3Processor {
             for (S3VersionSummary versionSummary : versionListing.getVersionSummaries()) {
                 long lastModified = versionSummary.getLastModified().getTime();
                 if (lastModified < currentTimestamp
-                        || lastModified == currentTimestamp && currentKeys.contains(versionSummary.getKey())) {
+                        || lastModified == currentTimestamp && currentKeys.contains(versionSummary.getKey())
+                        || lastModified > (listingTimestamp - minAgeMilliseconds)) {
                     continue;
                 }
 

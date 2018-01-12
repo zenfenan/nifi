@@ -27,6 +27,7 @@ import com.microsoft.azure.storage.blob.ListBlobItem;
 import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.apache.nifi.annotation.behavior.InputRequirement;
 import org.apache.nifi.annotation.behavior.InputRequirement.Requirement;
+import org.apache.nifi.annotation.behavior.RunOnPrimaryNode;
 import org.apache.nifi.annotation.behavior.Stateful;
 import org.apache.nifi.annotation.behavior.TriggerSerially;
 import org.apache.nifi.annotation.behavior.WritesAttribute;
@@ -55,9 +56,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+@RunOnPrimaryNode
 @TriggerSerially
 @Tags({ "azure", "microsoft", "cloud", "storage", "blob" })
-@SeeAlso({ FetchAzureBlobStorage.class, PutAzureBlobStorage.class })
+@SeeAlso({ FetchAzureBlobStorage.class, PutAzureBlobStorage.class, DeleteAzureBlobStorage.class })
 @CapabilityDescription("Lists blobs in an Azure Storage container. Listing details are attached to an empty FlowFile for use with FetchAzureBlobStorage.  " +
         "This Processor is designed to run on Primary Node only in a cluster. If the primary node changes, the new Primary Node will pick up where the " +
         "previous node left off without duplicating all of the data.")
@@ -102,10 +104,12 @@ public class ListAzureBlobStorage extends AbstractListProcessor<BlobInfo> {
     @Override
     protected Map<String, String> createAttributes(BlobInfo entity, ProcessContext context) {
         final Map<String, String> attributes = new HashMap<>();
+        attributes.put("azure.container", entity.getContainerName());
         attributes.put("azure.etag", entity.getEtag());
         attributes.put("azure.primaryUri", entity.getPrimaryUri());
         attributes.put("azure.secondaryUri", entity.getSecondaryUri());
-        attributes.put("azure.blobname", entity.getName());
+        attributes.put("azure.blobname", entity.getBlobName());
+        attributes.put("filename", entity.getName());
         attributes.put("azure.blobtype", entity.getBlobType());
         attributes.put("azure.length", String.valueOf(entity.getLength()));
         attributes.put("azure.timestamp", String.valueOf(entity.getTimestamp()));
@@ -162,6 +166,8 @@ public class ListAzureBlobStorage extends AbstractListProcessor<BlobInfo> {
 
                     Builder builder = new BlobInfo.Builder()
                                               .primaryUri(uri.getPrimaryUri().toString())
+                                              .blobName(cloudBlob.getName())
+                                              .containerName(containerName)
                                               .contentType(properties.getContentType())
                                               .contentLanguage(properties.getContentLanguage())
                                               .etag(properties.getEtag())

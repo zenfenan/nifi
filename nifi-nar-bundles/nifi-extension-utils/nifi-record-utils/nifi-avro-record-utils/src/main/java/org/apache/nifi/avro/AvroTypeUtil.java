@@ -19,7 +19,6 @@ package org.apache.nifi.avro;
 
 import java.io.IOException;
 import java.math.BigDecimal;
-import java.math.MathContext;
 import java.nio.ByteBuffer;
 import java.time.Duration;
 import java.time.temporal.ChronoUnit;
@@ -49,6 +48,8 @@ import org.apache.avro.generic.GenericFixed;
 import org.apache.avro.generic.GenericRecord;
 import org.apache.avro.specific.SpecificRecord;
 import org.apache.avro.util.Utf8;
+import org.apache.commons.lang3.tuple.ImmutablePair;
+import org.apache.commons.lang3.tuple.Pair;
 import org.apache.nifi.serialization.SimpleRecordSchema;
 import org.apache.nifi.serialization.record.DataType;
 import org.apache.nifi.serialization.record.MapRecord;
@@ -441,15 +442,41 @@ public class AvroTypeUtil {
         return bb;
     }
 
+    /**
+     * Method that attempts to map a record field into a provided schema
+     * @param avroSchema - Schema to map into
+     * @param recordField - The field of the record to be mapped
+     * @return Pair with the LHS being the field name and RHS being the mapped field from the schema
+     */
+    protected static Pair<String, Field> lookupField(final Schema avroSchema, final RecordField recordField) {
+        String fieldName = recordField.getFieldName();
+
+        // Attempt to locate the field as is in a true 1:1 mapping with the same name
+        Field field = avroSchema.getField(fieldName);
+        if (field == null) {
+            // No straight mapping was found, so check the aliases to see if it can be mapped
+            for(final String alias: recordField.getAliases()) {
+                field = avroSchema.getField(alias);
+                if (field != null) {
+                    fieldName = alias;
+                    break;
+                }
+            }
+        }
+
+        return new ImmutablePair<>(fieldName, field);
+    }
+
     public static GenericRecord createAvroRecord(final Record record, final Schema avroSchema) throws IOException {
         final GenericRecord rec = new GenericData.Record(avroSchema);
         final RecordSchema recordSchema = record.getSchema();
 
         for (final RecordField recordField : recordSchema.getFields()) {
             final Object rawValue = record.getValue(recordField);
-            final String fieldName = recordField.getFieldName();
 
-            final Field field = avroSchema.getField(fieldName);
+            Pair<String, Field> fieldPair = lookupField(avroSchema, recordField);
+            final String fieldName = fieldPair.getLeft();
+            final Field field = fieldPair.getRight();
             if (field == null) {
                 continue;
             }
@@ -472,7 +499,7 @@ public class AvroTypeUtil {
 
     /**
      * Convert a raw value to an Avro object to serialize in Avro type system.
-     * The counter-part method which reads an Avro object back to a raw value is {@link #normalizeValue(Object, Schema)}.
+     * The counter-part method which reads an Avro object back to a raw value is {@link #normalizeValue(Object, Schema, String)}.
      */
     public static Object convertToAvroObject(final Object rawValue, final Schema fieldSchema) {
         return convertToAvroObject(rawValue, fieldSchema, fieldSchema.getName());
@@ -531,18 +558,29 @@ public class AvroTypeUtil {
                 final LogicalType logicalType = fieldSchema.getLogicalType();
                 if (logicalType != null && LOGICAL_TYPE_DECIMAL.equals(logicalType.getName())) {
                     final LogicalTypes.Decimal decimalType = (LogicalTypes.Decimal) logicalType;
-                    final BigDecimal decimal;
+                    final BigDecimal rawDecimal;
                     if (rawValue instanceof BigDecimal) {
-                        final BigDecimal rawDecimal = (BigDecimal) rawValue;
-                        final int desiredScale = decimalType.getScale();
-                        // If the desired scale is different than this value's coerce scale.
-                        decimal = rawDecimal.scale() == desiredScale ? rawDecimal : rawDecimal.setScale(desiredScale, BigDecimal.ROUND_HALF_UP);
+                        rawDecimal = (BigDecimal) rawValue;
+
                     } else if (rawValue instanceof Double) {
-                        // Scale is adjusted based on precision. If double was 123.456 and precision is 5, then decimal would be 123.46.
-                        decimal = new BigDecimal((Double) rawValue, new MathContext(decimalType.getPrecision()));
+                        rawDecimal = BigDecimal.valueOf((Double) rawValue);
+
+                    } else if (rawValue instanceof String) {
+                        rawDecimal = new BigDecimal((String) rawValue);
+
+                    } else if (rawValue instanceof Integer) {
+                        rawDecimal = new BigDecimal((Integer) rawValue);
+
+                    } else if (rawValue instanceof Long) {
+                        rawDecimal = new BigDecimal((Long) rawValue);
+
                     } else {
                         throw new IllegalTypeConversionException("Cannot convert value " + rawValue + " of type " + rawValue.getClass() + " to a logical decimal");
                     }
+                    // If the desired scale is different than this value's coerce scale.
+                    final int desiredScale = decimalType.getScale();
+                    final BigDecimal decimal = rawDecimal.scale() == desiredScale
+                            ? rawDecimal : rawDecimal.setScale(desiredScale, BigDecimal.ROUND_HALF_UP);
                     return new Conversions.DecimalConversion().toBytes(decimal, fieldSchema, logicalType);
                 }
                 if (rawValue instanceof byte[]) {
