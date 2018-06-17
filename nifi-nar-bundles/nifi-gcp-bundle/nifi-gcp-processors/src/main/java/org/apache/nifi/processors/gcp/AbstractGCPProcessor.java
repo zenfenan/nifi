@@ -22,13 +22,17 @@ import com.google.cloud.ServiceOptions;
 import com.google.common.collect.ImmutableList;
 import org.apache.nifi.annotation.lifecycle.OnScheduled;
 import org.apache.nifi.components.PropertyDescriptor;
+import org.apache.nifi.components.ValidationContext;
+import org.apache.nifi.components.ValidationResult;
 import org.apache.nifi.expression.ExpressionLanguageScope;
 import org.apache.nifi.processor.AbstractProcessor;
 import org.apache.nifi.processor.ProcessContext;
 import org.apache.nifi.processor.util.StandardValidators;
 import org.apache.nifi.gcp.credentials.service.GCPCredentialsService;
+import org.apache.nifi.proxy.ProxyConfiguration;
+import org.apache.nifi.proxy.ProxySpec;
 
-
+import java.util.Collection;
 import java.util.List;
 
 /**
@@ -74,6 +78,9 @@ public abstract class AbstractGCPProcessor<
             .addValidator(StandardValidators.INTEGER_VALIDATOR)
             .build();
 
+    private static final ProxySpec[] PROXY_SPECS = {ProxySpec.HTTP};
+    public static final PropertyDescriptor PROXY_CONFIGURATION_SERVICE = ProxyConfiguration.createProxyConfigPropertyDescriptor(true, PROXY_SPECS);
+
 
     /**
      * Links to the {@link GCPCredentialsService} which provides credentials for this particular processor.
@@ -100,7 +107,8 @@ public abstract class AbstractGCPProcessor<
                 PROJECT_ID,
                 RETRY_COUNT,
                 PROXY_HOST,
-                PROXY_PORT
+                PROXY_PORT,
+                PROXY_CONFIGURATION_SERVICE
         );
     }
 
@@ -117,6 +125,7 @@ public abstract class AbstractGCPProcessor<
         return gcpCredentialsService.getGoogleCredentials();
     }
 
+
     /**
      * Assigns the cloud service client on scheduling.
      * @param context the process context provided on scheduling the processor.
@@ -127,6 +136,7 @@ public abstract class AbstractGCPProcessor<
         this.cloudService = options != null ? options.getService() : null;
     }
 
+
     /**
      * Builds the service-specific options as a necessary step in creating a cloud service.
      * @param context the process context provided on scheduling the processor.
@@ -135,4 +145,21 @@ public abstract class AbstractGCPProcessor<
      * @see <a href="http://googlecloudplatform.github.io/google-cloud-java/0.8.0/apidocs/com/google/cloud/ServiceOptions.html">ServiceOptions</a>
      */
     protected abstract CloudServiceOptions getServiceOptions(ProcessContext context, GoogleCredentials credentials);
+
+
+    protected void validateProxySpec(ValidationContext validationContext, Collection<ValidationResult> results) {
+        final boolean proxyHostSet = validationContext.getProperty(PROXY_HOST).isSet();
+        final boolean proxyPortSet = validationContext.getProperty(PROXY_PORT).isSet();
+
+        if ((proxyHostSet && !proxyPortSet) || (!proxyHostSet && proxyPortSet)) {
+            results.add(new ValidationResult.Builder()
+                    .explanation("If Proxy has to be configured, both " + PROXY_HOST.getDisplayName() + " and " + PROXY_PORT.getDisplayName() + " must be set.")
+                    .valid(false)
+                    .subject("Proxy configuration")
+                    .build());
+        }
+
+        ProxyConfiguration.validateProxySpec(validationContext, results, PROXY_SPECS);
+
+    }
 }
