@@ -1,0 +1,130 @@
+From 7ec2ac467f6a114037f4e2bfdd5df201cf2dd8d8 Mon Sep 17 00:00:00 2001
+From: zenfenan <sivaprasanna246@gmail.com>
+Date: Mon, 30 Jul 2018 23:18:37 +0530
+Subject: [PATCH] NIFI-5450: Added ENDPOINT_OVERRIDE to AWS SQS processors
+
+---
+ .../main/java/org/apache/nifi/processors/aws/sqs/DeleteSQS.java   | 2 +-
+ .../src/main/java/org/apache/nifi/processors/aws/sqs/GetSQS.java  | 3 ++-
+ .../src/main/java/org/apache/nifi/processors/aws/sqs/PutSQS.java  | 3 ++-
+ .../test/java/org/apache/nifi/processors/aws/sqs/ITGetSQS.java    | 8 ++++----
+ .../test/java/org/apache/nifi/processors/aws/sqs/ITPutSQS.java    | 8 ++++----
+ 5 files changed, 13 insertions(+), 11 deletions(-)
+
+diff --git a/nifi-nar-bundles/nifi-aws-bundle/nifi-aws-processors/src/main/java/org/apache/nifi/processors/aws/sqs/DeleteSQS.java b/nifi-nar-bundles/nifi-aws-bundle/nifi-aws-processors/src/main/java/org/apache/nifi/processors/aws/sqs/DeleteSQS.java
+index e2cef5050..71e4e02e8 100644
+--- a/nifi-nar-bundles/nifi-aws-bundle/nifi-aws-processors/src/main/java/org/apache/nifi/processors/aws/sqs/DeleteSQS.java
++++ b/nifi-nar-bundles/nifi-aws-bundle/nifi-aws-processors/src/main/java/org/apache/nifi/processors/aws/sqs/DeleteSQS.java
+@@ -57,7 +57,7 @@ public class DeleteSQS extends AbstractSQSProcessor {
+ 
+     public static final List<PropertyDescriptor> properties = Collections.unmodifiableList(
+             Arrays.asList(QUEUE_URL, RECEIPT_HANDLE, ACCESS_KEY, SECRET_KEY, CREDENTIALS_FILE, AWS_CREDENTIALS_PROVIDER_SERVICE,
+-                    REGION, TIMEOUT, PROXY_HOST, PROXY_HOST_PORT));
++                    REGION, TIMEOUT, ENDPOINT_OVERRIDE, PROXY_HOST, PROXY_HOST_PORT));
+ 
+     @Override
+     protected List<PropertyDescriptor> getSupportedPropertyDescriptors() {
+diff --git a/nifi-nar-bundles/nifi-aws-bundle/nifi-aws-processors/src/main/java/org/apache/nifi/processors/aws/sqs/GetSQS.java b/nifi-nar-bundles/nifi-aws-bundle/nifi-aws-processors/src/main/java/org/apache/nifi/processors/aws/sqs/GetSQS.java
+index 17f8c4b47..c5cb90e89 100644
+--- a/nifi-nar-bundles/nifi-aws-bundle/nifi-aws-processors/src/main/java/org/apache/nifi/processors/aws/sqs/GetSQS.java
++++ b/nifi-nar-bundles/nifi-aws-bundle/nifi-aws-processors/src/main/java/org/apache/nifi/processors/aws/sqs/GetSQS.java
+@@ -118,7 +118,8 @@ public class GetSQS extends AbstractSQSProcessor {
+ 
+     public static final List<PropertyDescriptor> properties = Collections.unmodifiableList(
+             Arrays.asList(DYNAMIC_QUEUE_URL, AUTO_DELETE, ACCESS_KEY, SECRET_KEY, CREDENTIALS_FILE,
+-                AWS_CREDENTIALS_PROVIDER_SERVICE, REGION, BATCH_SIZE, TIMEOUT, CHARSET, VISIBILITY_TIMEOUT, RECEIVE_MSG_WAIT_TIME, PROXY_HOST, PROXY_HOST_PORT));
++                    AWS_CREDENTIALS_PROVIDER_SERVICE, REGION, BATCH_SIZE, TIMEOUT, ENDPOINT_OVERRIDE,
++                    CHARSET, VISIBILITY_TIMEOUT, RECEIVE_MSG_WAIT_TIME, PROXY_HOST, PROXY_HOST_PORT));
+ 
+     @Override
+     protected List<PropertyDescriptor> getSupportedPropertyDescriptors() {
+diff --git a/nifi-nar-bundles/nifi-aws-bundle/nifi-aws-processors/src/main/java/org/apache/nifi/processors/aws/sqs/PutSQS.java b/nifi-nar-bundles/nifi-aws-bundle/nifi-aws-processors/src/main/java/org/apache/nifi/processors/aws/sqs/PutSQS.java
+index a203da027..cfa32b412 100644
+--- a/nifi-nar-bundles/nifi-aws-bundle/nifi-aws-processors/src/main/java/org/apache/nifi/processors/aws/sqs/PutSQS.java
++++ b/nifi-nar-bundles/nifi-aws-bundle/nifi-aws-processors/src/main/java/org/apache/nifi/processors/aws/sqs/PutSQS.java
+@@ -66,7 +66,8 @@ public class PutSQS extends AbstractSQSProcessor {
+             .build();
+ 
+     public static final List<PropertyDescriptor> properties = Collections.unmodifiableList(
+-            Arrays.asList(QUEUE_URL, ACCESS_KEY, SECRET_KEY, CREDENTIALS_FILE, AWS_CREDENTIALS_PROVIDER_SERVICE, REGION, DELAY, TIMEOUT, PROXY_HOST, PROXY_HOST_PORT));
++            Arrays.asList(QUEUE_URL, ACCESS_KEY, SECRET_KEY, CREDENTIALS_FILE, AWS_CREDENTIALS_PROVIDER_SERVICE,
++                    REGION, DELAY, TIMEOUT, ENDPOINT_OVERRIDE, PROXY_HOST, PROXY_HOST_PORT));
+ 
+     private volatile List<PropertyDescriptor> userDefinedProperties = Collections.emptyList();
+ 
+diff --git a/nifi-nar-bundles/nifi-aws-bundle/nifi-aws-processors/src/test/java/org/apache/nifi/processors/aws/sqs/ITGetSQS.java b/nifi-nar-bundles/nifi-aws-bundle/nifi-aws-processors/src/test/java/org/apache/nifi/processors/aws/sqs/ITGetSQS.java
+index ac9383e81..f59dfb4f2 100644
+--- a/nifi-nar-bundles/nifi-aws-bundle/nifi-aws-processors/src/test/java/org/apache/nifi/processors/aws/sqs/ITGetSQS.java
++++ b/nifi-nar-bundles/nifi-aws-bundle/nifi-aws-processors/src/test/java/org/apache/nifi/processors/aws/sqs/ITGetSQS.java
+@@ -31,13 +31,14 @@ import org.junit.Test;
+ public class ITGetSQS {
+ 
+     private final String CREDENTIALS_FILE = System.getProperty("user.home") + "/aws-credentials.properties";
++    private final String QUEUE_URL = "https://sqs.us-west-2.amazonaws.com/100515378163/test-queue-000000000";
+ 
+     @Test
+     public void testSimpleGet() {
+         final TestRunner runner = TestRunners.newTestRunner(new GetSQS());
+         runner.setProperty(PutSNS.CREDENTIALS_FILE, CREDENTIALS_FILE);
+         runner.setProperty(GetSQS.TIMEOUT, "30 secs");
+-        runner.setProperty(GetSQS.QUEUE_URL, "https://sqs.us-west-2.amazonaws.com/100515378163/test-queue-000000000");
++        runner.setProperty(GetSQS.QUEUE_URL, QUEUE_URL);
+ 
+         runner.run(1);
+ 
+@@ -71,14 +72,13 @@ public class ITGetSQS {
+         final TestRunner runner = TestRunners.newTestRunner(new GetSQS());
+ 
+         runner.setProperty(GetSQS.TIMEOUT, "30 secs");
+-        String queueUrl = "Add queue url here";
+-        runner.setProperty(GetSQS.QUEUE_URL, queueUrl);
++        runner.setProperty(GetSQS.QUEUE_URL, QUEUE_URL);
+ 
+         final AWSCredentialsProviderControllerService serviceImpl = new AWSCredentialsProviderControllerService();
+ 
+         runner.addControllerService("awsCredentialsProvider", serviceImpl);
+ 
+-        runner.setProperty(serviceImpl, AbstractAWSProcessor.CREDENTIALS_FILE, System.getProperty("user.home") + "/aws-credentials.properties");
++        runner.setProperty(serviceImpl, AbstractAWSProcessor.CREDENTIALS_FILE, CREDENTIALS_FILE);
+         runner.enableControllerService(serviceImpl);
+ 
+         runner.assertValid(serviceImpl);
+diff --git a/nifi-nar-bundles/nifi-aws-bundle/nifi-aws-processors/src/test/java/org/apache/nifi/processors/aws/sqs/ITPutSQS.java b/nifi-nar-bundles/nifi-aws-bundle/nifi-aws-processors/src/test/java/org/apache/nifi/processors/aws/sqs/ITPutSQS.java
+index ba9bfaaba..4fd661066 100644
+--- a/nifi-nar-bundles/nifi-aws-bundle/nifi-aws-processors/src/test/java/org/apache/nifi/processors/aws/sqs/ITPutSQS.java
++++ b/nifi-nar-bundles/nifi-aws-bundle/nifi-aws-processors/src/test/java/org/apache/nifi/processors/aws/sqs/ITPutSQS.java
+@@ -36,13 +36,14 @@ import org.junit.Test;
+ public class ITPutSQS {
+ 
+     private final String CREDENTIALS_FILE = System.getProperty("user.home") + "/aws-credentials.properties";
++    private final String QUEUE_URL = "https://sqs.us-west-2.amazonaws.com/100515378163/test-queue-000000000";
+ 
+     @Test
+     public void testSimplePut() throws IOException {
+         final TestRunner runner = TestRunners.newTestRunner(new PutSQS());
+         runner.setProperty(PutSNS.CREDENTIALS_FILE, CREDENTIALS_FILE);
+         runner.setProperty(PutSQS.TIMEOUT, "30 secs");
+-        runner.setProperty(PutSQS.QUEUE_URL, "https://sqs.us-west-2.amazonaws.com/100515378163/test-queue-000000000");
++        runner.setProperty(PutSQS.QUEUE_URL, QUEUE_URL);
+         Assert.assertTrue(runner.setProperty("x-custom-prop", "hello").isValid());
+ 
+         final Map<String, String> attrs = new HashMap<>();
+@@ -58,13 +59,12 @@ public class ITPutSQS {
+         final TestRunner runner = TestRunners.newTestRunner(new PutSQS());
+ 
+         runner.setProperty(PutSQS.TIMEOUT, "30 secs");
+-        String queueUrl = "Add queue url here";
+-        runner.setProperty(PutSQS.QUEUE_URL, queueUrl);
++        runner.setProperty(PutSQS.QUEUE_URL, QUEUE_URL);
+         final AWSCredentialsProviderControllerService serviceImpl = new AWSCredentialsProviderControllerService();
+ 
+         runner.addControllerService("awsCredentialsProvider", serviceImpl);
+ 
+-        runner.setProperty(serviceImpl, AbstractAWSProcessor.CREDENTIALS_FILE, System.getProperty("user.home") + "/aws-credentials.properties");
++        runner.setProperty(serviceImpl, AbstractAWSProcessor.CREDENTIALS_FILE, CREDENTIALS_FILE);
+         runner.enableControllerService(serviceImpl);
+ 
+         runner.assertValid(serviceImpl);
+-- 
+2.15.0.windows.1
+
