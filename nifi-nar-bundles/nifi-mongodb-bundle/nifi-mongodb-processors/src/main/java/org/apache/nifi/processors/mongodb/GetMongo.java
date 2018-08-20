@@ -32,6 +32,8 @@ import org.apache.nifi.annotation.documentation.Tags;
 import org.apache.nifi.components.AllowableValue;
 import org.apache.nifi.components.PropertyDescriptor;
 import org.apache.nifi.components.Validator;
+import org.apache.nifi.components.state.Scope;
+import org.apache.nifi.components.state.StateMap;
 import org.apache.nifi.expression.ExpressionLanguageScope;
 import org.apache.nifi.flowfile.FlowFile;
 import org.apache.nifi.flowfile.attributes.CoreAttributes;
@@ -140,6 +142,26 @@ public class GetMongo extends AbstractMongoProcessor {
             .addValidator(Validator.VALID)
             .build();
 
+    static final PropertyDescriptor STATE_MGMNT = new PropertyDescriptor.Builder()
+            .name("enable-state-management")
+            .displayName("Enable State Management")
+            .description("If set to 'True', the time at which the document was inserted would be used for state management.")
+            .required(true)
+            .defaultValue("false")
+            .allowableValues(new AllowableValue("true", "True"), new AllowableValue("false", "False"))
+            .build();
+
+    static final PropertyDescriptor STATE_MGMNT_FIELD = new PropertyDescriptor.Builder()
+            .name("state-management-field")
+            .displayName("State Management Field")
+            .description("The name of the field with type 'ObjectID'. By default, '_id' would be used. If your document schema doesn't have '_id'" +
+                    " as 'ObjectID', provide the name of any other field with type 'ObjectID'")
+            .defaultValue("_id")
+            .required(false)
+            .addValidator(StandardValidators.NON_EMPTY_VALIDATOR)
+            .expressionLanguageSupported(ExpressionLanguageScope.NONE)
+            .build();
+
     private final static Set<Relationship> relationships;
     private final static List<PropertyDescriptor> propertyDescriptors;
 
@@ -152,6 +174,8 @@ public class GetMongo extends AbstractMongoProcessor {
         _propertyDescriptors.add(QUERY);
         _propertyDescriptors.add(QUERY_ATTRIBUTE);
         _propertyDescriptors.add(PROJECTION);
+        _propertyDescriptors.add(STATE_MGMNT);
+        _propertyDescriptors.add(STATE_MGMNT_FIELD);
         _propertyDescriptors.add(SORT);
         _propertyDescriptors.add(LIMIT);
         _propertyDescriptors.add(BATCH_SIZE);
@@ -204,6 +228,7 @@ public class GetMongo extends AbstractMongoProcessor {
     @Override
     public void onTrigger(final ProcessContext context, final ProcessSession session) throws ProcessException {
         FlowFile input = null;
+
         if (context.hasIncomingConnection()) {
             input = session.get();
 
@@ -219,8 +244,8 @@ public class GetMongo extends AbstractMongoProcessor {
 
         final Document query;
         final Charset charset = Charset.forName(context.getProperty(CHARSET).evaluateAttributeExpressions(input).getValue());
-
         String queryStr;
+
         if (context.getProperty(QUERY).isSet()) {
             queryStr = context.getProperty(QUERY).evaluateAttributeExpressions(input).getValue();
             query = Document.parse(queryStr);
@@ -258,7 +283,6 @@ public class GetMongo extends AbstractMongoProcessor {
         final String usePrettyPrint  = context.getProperty(USE_PRETTY_PRINTING).getValue();
         configureMapper(jsonTypeSetting);
 
-
         try {
             final MongoCollection<Document> collection = getCollection(context, input);
 
@@ -279,16 +303,22 @@ public class GetMongo extends AbstractMongoProcessor {
                 it.batchSize(context.getProperty(BATCH_SIZE).evaluateAttributeExpressions(input).asInteger());
             }
 
-            final MongoCursor<Document> cursor = it.iterator();
             ComponentLog log = getLogger();
-            try {
+            Document currentDocument;
+
+            try (MongoCursor<Document> cursor = it.iterator()) {
                 FlowFile outgoingFlowFile;
+
                 if (context.getProperty(RESULTS_PER_FLOWFILE).isSet()) {
                     int ceiling = context.getProperty(RESULTS_PER_FLOWFILE).evaluateAttributeExpressions(input).asInteger();
                     List<Document> batch = new ArrayList<>();
 
-                    while (cursor.hasNext()) {
-                        batch.add(cursor.next());
+                    while (cursor.hasNext()) {git bash
+                        currentDocument = cursor.next();
+//                        if (enableStateManagement) {
+//                            performStateManagement(currentDocument, stateManagementField);
+//                        }
+                        batch.add(currentDocument);
                         if (batch.size() == ceiling) {
                             try {
                                 if (log.isDebugEnabled()) {
@@ -311,13 +341,14 @@ public class GetMongo extends AbstractMongoProcessor {
                     }
                 } else {
                     while (cursor.hasNext()) {
+                        currentDocument = cursor.next();
                         outgoingFlowFile = (input == null) ? session.create() : session.create(input);
                         outgoingFlowFile = session.write(outgoingFlowFile, out -> {
                             String json;
                             if (jsonTypeSetting.equals(JSON_TYPE_STANDARD)) {
-                                json = getObjectWriter(objectMapper, usePrettyPrint).writeValueAsString(cursor.next());
+                                json = getObjectWriter(objectMapper, usePrettyPrint).writeValueAsString(currentDocument);
                             } else {
-                                json = cursor.next().toJson();
+                                json = currentDocument.toJson();
                             }
                             out.write(json.getBytes(charset));
                         });
@@ -332,8 +363,7 @@ public class GetMongo extends AbstractMongoProcessor {
                     session.transfer(input, REL_ORIGINAL);
                 }
 
-            } finally {
-                cursor.close();
+
             }
 
         } catch (final RuntimeException e) {
@@ -343,5 +373,11 @@ public class GetMongo extends AbstractMongoProcessor {
             context.yield();
             logger.error("Failed to execute query {} due to {}", new Object[] { query, e }, e);
         }
+    }
+
+    private void determineListable(MongoCursor<Document> cursor, ProcessContext context) {
+        final boolean enableStateManagement = context.getProperty(STATE_MGMNT).asBoolean();
+        final String stateManagementField = context.getProperty(STATE_MGMNT_FIELD).isSet() ? context.getProperty(STATE_MGMNT_FIELD).getValue() : "_id";
+
     }
 }
