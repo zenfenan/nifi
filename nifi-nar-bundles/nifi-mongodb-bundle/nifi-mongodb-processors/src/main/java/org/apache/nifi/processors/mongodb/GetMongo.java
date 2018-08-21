@@ -149,7 +149,7 @@ public class GetMongo extends AbstractMongoProcessor {
 
     private final static Set<Relationship> relationships;
     private final static List<PropertyDescriptor> propertyDescriptors;
-    private final ComponentLog logger = getLogger();
+    private ComponentLog logger;
 
     static {
         List<PropertyDescriptor> _propertyDescriptors = new ArrayList<>();
@@ -212,6 +212,7 @@ public class GetMongo extends AbstractMongoProcessor {
     @Override
     public void onTrigger(final ProcessContext context, final ProcessSession session) throws ProcessException {
         FlowFile input = null;
+        logger = getLogger();
 
         if (context.hasIncomingConnection()) {
             input = session.get();
@@ -220,9 +221,8 @@ public class GetMongo extends AbstractMongoProcessor {
             }
         }
 
-        final String queryStr = getQueryString(context, session, input);
-
-        if (queryStr == null) {
+        final Document query = getQuery(context, session, input );
+        if (query == null) {
             return;
         }
 
@@ -230,14 +230,14 @@ public class GetMongo extends AbstractMongoProcessor {
         final String usePrettyPrint  = context.getProperty(USE_PRETTY_PRINTING).getValue();
         final Charset charset = Charset.forName(context.getProperty(CHARSET).evaluateAttributeExpressions(input).getValue());
 
-        final Document query = Document.parse(queryStr);
+
         final Map<String, String> attributes = new HashMap<>();
 
         attributes.put(CoreAttributes.MIME_TYPE.key(), "application/json");
 
         if (context.getProperty(QUERY_ATTRIBUTE).isSet()) {
             final String queryAttr = context.getProperty(QUERY_ATTRIBUTE).evaluateAttributeExpressions(input).getValue();
-            attributes.put(queryAttr, queryStr);
+            attributes.put(queryAttr, query.toJson());
         }
 
         final Document projection = context.getProperty(PROJECTION).isSet()
@@ -246,7 +246,7 @@ public class GetMongo extends AbstractMongoProcessor {
                 ? Document.parse(context.getProperty(SORT).evaluateAttributeExpressions(input).getValue()) : null;
 
         final MongoCollection<Document> collection = getCollection(context, input);
-        final FindIterable<Document> it = query != null ? collection.find(query) : collection.find();
+        final FindIterable<Document> it = collection.find(query);
 
         attributes.put(DB_NAME, collection.getNamespace().getDatabaseName());
         attributes.put(COL_NAME, collection.getNamespace().getCollectionName());
@@ -316,29 +316,30 @@ public class GetMongo extends AbstractMongoProcessor {
 
     }
 
-    private String getQueryString(ProcessContext context, ProcessSession session, FlowFile input) {
-        String queryString = null;
+    private Document getQuery(ProcessContext context, ProcessSession session, FlowFile input) {
+        Document query = null;
         if (context.getProperty(QUERY).isSet()) {
-            queryString = context.getProperty(QUERY).evaluateAttributeExpressions(input).getValue();
+            query = Document.parse(context.getProperty(QUERY).evaluateAttributeExpressions(input).getValue());
         } else if (!context.getProperty(QUERY).isSet() && input == null) {
-            queryString = "{}";
+            query = Document.parse("{}");
         } else {
             try {
                 ByteArrayOutputStream out = new ByteArrayOutputStream();
                 session.exportTo(input, out);
                 out.close();
-                queryString = new String(out.toByteArray());
+                query = Document.parse(new String(out.toByteArray()));
             } catch (Exception ex) {
                 logger.error("Error reading FlowFile : ", ex);
                 if (input != null) { //Likely culprit is a bad query
                     session.transfer(input, REL_FAILURE);
+                    session.commit();
                 } else {
                     throw new ProcessException(ex);
                 }
             }
         }
 
-        return queryString;
+        return query;
     }
 
     private List<List<Document>> chunkDocumentsList(List<Document> originalList, int perChunkSize) {

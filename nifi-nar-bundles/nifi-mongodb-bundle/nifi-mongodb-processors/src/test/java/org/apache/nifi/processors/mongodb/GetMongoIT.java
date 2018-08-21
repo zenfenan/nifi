@@ -313,7 +313,7 @@ public class GetMongoIT {
         runner.setProperty(GetMongo.QUERY_ATTRIBUTE, attr);
         runner.run();
         runner.assertTransferCount(GetMongo.REL_SUCCESS, 3);
-        testQueryAttribute(attr, "{}");
+        testQueryAttribute(attr, "{ }");
 
         runner.clearTransferState();
 
@@ -323,7 +323,7 @@ public class GetMongoIT {
         runner.removeProperty(GetMongo.QUERY);
         runner.setIncomingConnection(false);
         runner.run();
-        testQueryAttribute(attr, "{}");
+        testQueryAttribute(attr, "{ }");
 
         runner.clearTransferState();
 
@@ -334,7 +334,7 @@ public class GetMongoIT {
         runner.setIncomingConnection(true);
         runner.enqueue("{}");
         runner.run();
-        testQueryAttribute(attr, "{}");
+        testQueryAttribute(attr, "{ }");
 
         /*
          * Input flowfile with invalid query
