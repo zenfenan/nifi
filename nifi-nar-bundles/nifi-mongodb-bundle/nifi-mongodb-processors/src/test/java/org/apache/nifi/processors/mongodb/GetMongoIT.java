@@ -39,13 +39,7 @@ import org.junit.Before;
 import org.junit.Test;
 
 import java.text.SimpleDateFormat;
-import java.util.Calendar;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
 public class GetMongoIT {
     private static final String MONGO_URI = "mongodb://localhost";
@@ -194,8 +188,8 @@ public class GetMongoIT {
     public void testReadMultipleDocuments() throws Exception {
         runner.setProperty(GetMongo.QUERY, "{\"a\": {\"$exists\": \"true\"}}");
         runner.run();
-
         runner.assertAllFlowFilesTransferred(GetMongo.REL_SUCCESS, 3);
+
         List<MockFlowFile> flowFiles = runner.getFlowFilesForRelationship(GetMongo.REL_SUCCESS);
         for (int i=0; i < flowFiles.size(); i++) {
             flowFiles.get(i).assertContentEquals(DOCUMENTS.get(i).toJson());
@@ -478,6 +472,7 @@ public class GetMongoIT {
      */
     @Test
     public void testDatabaseEL() {
+        runner.clearTransferState();
         runner.removeVariable("collection");
         runner.removeVariable("db");
         runner.setIncomingConnection(true);
@@ -506,26 +501,36 @@ public class GetMongoIT {
         }
 
         Map<String, Map<String, String>> vals = new HashMap<String, Map<String, String>>(){{
-            put("Database", new HashMap<String, String>(){{
-                put("db", "");
-                put("collection", "test");
-            }});
             put("Collection", new HashMap<String, String>(){{
                 put("db", "getmongotest");
                 put("collection", "");
             }});
+            put("Database", new HashMap<String, String>(){{
+                put("db", "");
+                put("collection", "test");
+            }});
         }};
 
+        TestRunner tmpRunner;
+
         for (Map.Entry<String, Map<String, String>> entry : vals.entrySet()) {
-            runner.enqueue("{}", entry.getValue());
+            // Creating a new runner for each set of attributes map since every subsequent runs will attempt to take the top most enqueued FlowFile
+            tmpRunner = TestRunners.newTestRunner(GetMongo.class);
+            tmpRunner.setProperty(AbstractMongoProcessor.URI, MONGO_URI);
+            tmpRunner.setProperty(AbstractMongoProcessor.DATABASE_NAME, DB_NAME);
+            tmpRunner.setProperty(AbstractMongoProcessor.COLLECTION_NAME, COLLECTION_NAME);
+            tmpRunner.setIncomingConnection(true);
+
+            tmpRunner.enqueue("{ }", entry.getValue());
+
             try {
-                runner.run();
+                tmpRunner.run();
             } catch (Throwable ex) {
                 Throwable cause = ex.getCause();
                 Assert.assertTrue(cause instanceof ProcessException);
-                Assert.assertTrue(entry.getKey(), cause.getMessage().contains(entry.getKey()));
+                Assert.assertTrue(entry.getKey(), ex.getMessage().contains(entry.getKey()));
             }
-            runner.clearTransferState();
+            tmpRunner.clearTransferState();
 
         }
     }

@@ -222,6 +222,7 @@ public class GetMongo extends AbstractMongoProcessor {
         }
 
         final Document query = getQuery(context, session, input );
+        
         if (query == null) {
             return;
         }
@@ -229,8 +230,6 @@ public class GetMongo extends AbstractMongoProcessor {
         final String jsonTypeSetting = context.getProperty(JSON_TYPE).getValue();
         final String usePrettyPrint  = context.getProperty(USE_PRETTY_PRINTING).getValue();
         final Charset charset = Charset.forName(context.getProperty(CHARSET).evaluateAttributeExpressions(input).getValue());
-
-
         final Map<String, String> attributes = new HashMap<>();
 
         attributes.put(CoreAttributes.MIME_TYPE.key(), "application/json");
@@ -266,7 +265,8 @@ public class GetMongo extends AbstractMongoProcessor {
 
         try (MongoCursor<Document> cursor = it.iterator()) {
             final List<Document> listOfDocuments = new ArrayList<>();
-            final FlowFile inputFF = input;
+//            final FlowFile inputFF = input;
+//            final ProcessSession sessionCopy = session;
             Document doc;
 
             configureMapper(jsonTypeSetting);
@@ -279,19 +279,47 @@ public class GetMongo extends AbstractMongoProcessor {
                 final int sizePerChunk = context.getProperty(RESULTS_PER_FLOWFILE).evaluateAttributeExpressions(input).asInteger();
                 List<List<Document>> chunks = chunkDocumentsList(listOfDocuments, sizePerChunk);
 
-                chunks.parallelStream().forEach( documentList -> {
+//                chunks.parallelStream().forEach( documentList -> {
+//                    try {
+//                        String payload = buildBatch(documentList, jsonTypeSetting, usePrettyPrint);
+//                        writeBatch(payload, inputFF, context, sessionCopy, attributes, REL_SUCCESS);
+//                    } catch (Exception e) {
+//                        logger.error("Error building batch due to {}", new Object[] {e});
+//                    }
+//                });
+
+                for (final List<Document> chunk : chunks) {
                     try {
-                        String payload = buildBatch(documentList, jsonTypeSetting, usePrettyPrint);
-                        writeBatch(payload, inputFF, context, session, attributes, REL_SUCCESS);
+                        String payload = buildBatch(chunk, jsonTypeSetting, usePrettyPrint);
+                        writeBatch(payload, input, context, session, attributes, REL_SUCCESS);
                     } catch (Exception e) {
                         logger.error("Error building batch due to {}", new Object[] {e});
                     }
-                });
+                }
             } else {
-                listOfDocuments.parallelStream().forEach( document -> {
-                    FlowFile outgoingFlowFile = (inputFF == null) ? session.create() : session.create(inputFF);
+//                listOfDocuments.parallelStream().forEach( document -> {
+//                    FlowFile outgoingFlowFile = (inputFF == null) ? sessionCopy.create() : sessionCopy.create(inputFF);
+//
+//                    outgoingFlowFile = sessionCopy.write(outgoingFlowFile, out -> {
+//                        String json;
+//
+//                        if (jsonTypeSetting.equals(JSON_TYPE_STANDARD)) {
+//                            json = getObjectWriter(objectMapper, usePrettyPrint).writeValueAsString(document);
+//                        } else {
+//                            json = document.toJson();
+//                        }
+//                        out.write(json.getBytes(charset));
+//                    });
+//
+//                    outgoingFlowFile = sessionCopy.putAllAttributes(outgoingFlowFile, attributes);
+//
+//                    sessionCopy.getProvenanceReporter().receive(outgoingFlowFile, getURI(context));
+//                    sessionCopy.transfer(outgoingFlowFile, REL_SUCCESS);
+//                });
+                for (final Document document : listOfDocuments) {
+                    FlowFile outgoingFF = (input == null) ? session.create() : session.create(input);
 
-                    outgoingFlowFile = session.write(outgoingFlowFile, out -> {
+                    outgoingFF = session.write(outgoingFF, out -> {
                         String json;
 
                         if (jsonTypeSetting.equals(JSON_TYPE_STANDARD)) {
@@ -299,14 +327,15 @@ public class GetMongo extends AbstractMongoProcessor {
                         } else {
                             json = document.toJson();
                         }
+
                         out.write(json.getBytes(charset));
                     });
 
-                    outgoingFlowFile = session.putAllAttributes(outgoingFlowFile, attributes);
+                    outgoingFF = session.putAllAttributes(outgoingFF, attributes);
 
-                    session.getProvenanceReporter().receive(outgoingFlowFile, getURI(context));
-                    session.transfer(outgoingFlowFile, REL_SUCCESS);
-                });
+                    session.getProvenanceReporter().receive(outgoingFF, getURI(context));
+                    session.transfer(outgoingFF, REL_SUCCESS);
+                }
             }
 
             if (input != null) {
